@@ -10,8 +10,6 @@ os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 import streamlit as st
 from PIL import Image
 from datetime import datetime
-import threading
-import time
 
 # 导入模型模块
 from modules.models.smart_model import SmartModelManager
@@ -54,50 +52,6 @@ st.set_page_config(
 )
 
 
-# ==================== Ollama 预加载 ====================
-def preload_ollama_models():
-    """后台预加载 Ollama 模型"""
-    try:
-        import requests
-        # 等待 Ollama 服务启动
-        time.sleep(2)
-
-        # 检查 Ollama 是否可用
-        try:
-            response = requests.get("http://localhost:11434/api/tags", timeout=5)
-            if response.status_code != 200:
-                print("⚠️ Ollama 服务未启动，跳过预加载")
-                return
-        except:
-            print("⚠️ 无法连接 Ollama，跳过预加载")
-            return
-
-        # 预加载文本模型
-        print("🔄 正在预加载 Ollama 文本模型...")
-        requests.post(
-            "http://localhost:11434/api/generate",
-            json={"model": "qwen:7b", "prompt": " ", "stream": False},
-            timeout=30
-        )
-        print("✅ Ollama 文本模型预加载完成")
-
-        # 预加载视觉模型
-        print("🔄 正在预加载 Ollama 视觉模型...")
-        requests.post(
-            "http://localhost:11434/api/generate",
-            json={"model": "moondream", "prompt": " ", "stream": False},
-            timeout=30
-        )
-        print("✅ Ollama 视觉模型预加载完成")
-
-    except Exception as e:
-        print(f"⚠️ Ollama 预加载失败（不影响使用）: {e}")
-
-
-# 启动后台线程预加载 Ollama
-threading.Thread(target=preload_ollama_models, daemon=True).start()
-
-
 # ==================== 初始化 ====================
 
 @st.cache_resource
@@ -112,9 +66,8 @@ model_manager = init_model_manager()
 def init_session_state():
     """初始化 session state"""
     if "kb_manager" not in st.session_state:
-        with st.spinner("正在初始化向量数据库和模型..."):
-            st.session_state.kb_manager = KnowledgeBaseManager()
-            st.session_state.kb_manager_available = True
+        st.session_state.kb_manager = None
+        st.session_state.kb_manager_available = False  # 云端环境禁用本地向量检索
 
     if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = [{
@@ -154,7 +107,6 @@ def smart_search(query, category=None, top_k=5):
             category_hint = f"（分类：{category}）" if category else ""
             return f"📭 未找到与「{query}」相关的内容{category_hint}。\n\n💡 建议：\n• 尝试使用更简短的关键词\n• 检查关键词拼写\n• 更换其他分类试试"
 
-        # 过滤低相关度结果
         filtered_results = [r for r in results if r.get('similarity', 0) >= 0.15]
 
         if not filtered_results:
@@ -481,18 +433,15 @@ elif selected_menu == "🎉 活动查询":
 else:  # 💬 智能对话
     st.title("💬 智能对话")
 
-    # 显示对话历史
     for msg in st.session_state.chat_messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # 显示当前使用的模型
     if st.session_state.get("current_provider"):
         provider_icon = "🌐" if st.session_state.current_provider == "deepseek" else "💻"
         provider_name = "DeepSeek云端" if st.session_state.current_provider == "deepseek" else "Ollama本地"
         st.caption(f"{provider_icon} 当前使用：{provider_name}")
 
-    # 清除图片按钮
     if st.session_state.uploaded_image:
         col1, col2 = st.columns([1, 5])
         with col1:
@@ -502,7 +451,6 @@ else:  # 💬 智能对话
 
     st.markdown("---")
 
-    # 建议问题
     with st.expander("💡 建议问题"):
         st.markdown("""
         - 今天有什么课？
@@ -512,7 +460,6 @@ else:  # 💬 智能对话
         - 帮我规划复习计划
         """)
 
-    # 用户输入
     user_input = st.chat_input("输入你的问题...")
 
     if user_input:
